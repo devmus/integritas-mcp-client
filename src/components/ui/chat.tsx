@@ -2,13 +2,18 @@
 
 import { useState, useEffect, useRef } from "react";
 
+interface ToolStep {
+  thought?: string;
+  result?: string;
+}
+
 export function Chat() {
-  const [messages, setMessages] = useState<{
+  const [messages, setMessages] = useState<Array<{
     role: "user" | "assistant";
     content: string;
-    proof?: any;
+    proof?: object;
     isError?: boolean;
-  }>([]);
+  }>>([]);
   const [input, setInput] = useState("");
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -34,7 +39,7 @@ export function Chat() {
     scrollToBottom();
   }, [messages]);
 
-  const handleDownloadProof = (proof: any) => {
+  const handleDownloadProof = (proof: object) => {
     const blob = new Blob([JSON.stringify(proof, null, 2)], {
       type: "application/json",
     });
@@ -91,7 +96,7 @@ export function Chat() {
         // Assuming tool_steps is an array of objects with thought/result properties
         assistantMessage += data.tool_steps
           .map(
-            (step: any) =>
+            (step: ToolStep) =>
               `> ${step.thought || "Thinking..."}\n✅ ${step.result || "Done."}`
           )
           .join("\n\n");
@@ -103,9 +108,9 @@ export function Chat() {
         ...prev,
         { role: "assistant", content: assistantMessage },
       ]);
-    } catch (error: any) {
+    } catch (error: unknown) {
       let errorMessage = "An unexpected error occurred.";
-      if (error.message) {
+      if (error instanceof Error) {
         errorMessage = error.message;
       }
       setMessages((prev) => [
@@ -139,7 +144,7 @@ export function Chat() {
               </div>
               {msg.proof && (
                 <button
-                  onClick={() => handleDownloadProof(msg.proof)}
+                  onClick={() => msg.proof && handleDownloadProof(msg.proof)}
                   className="mt-2 px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
                 >
                   Download Proof
