@@ -199,7 +199,7 @@ export function Chat() {
   ): Promise<{ url: string; filename: string }> {
     const fd = new FormData();
     fd.append("file", f);
-    const resp = await fetch("/api/upload", { method: "POST", body: fd });
+    const resp = await fetch("api/upload", { method: "POST", body: fd });
     if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
     const data = await resp.json();
     return { url: data.signedUrl as string, filename: data.filename as string };
@@ -229,7 +229,7 @@ export function Chat() {
       setInput("");
       setFile(null);
 
-      const apiUrl = process.env.NEXT_PUBLIC_CHAT_API_URL || "/api/chat";
+      const apiUrl = process.env.NEXT_PUBLIC_CHAT_API_URL || "api/chat";
       const headers: HeadersInit = { "Content-Type": "application/json" };
       if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
       if (apiKey) headers["x-api-key"] = apiKey;
