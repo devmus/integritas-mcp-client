@@ -234,6 +234,8 @@ export function Chat() {
       if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
       if (apiKey) headers["x-api-key"] = apiKey;
 
+      console.log("API url", apiUrl);
+
       const resp = await fetch(apiUrl, {
         method: "POST",
         headers,

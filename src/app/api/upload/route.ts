@@ -4,6 +4,8 @@ import crypto from "crypto";
 import { uploadToMinio } from "@/lib/minio/uploadToMinio.mjs";
 
 export async function POST(req: Request) {
+  console.log("uploading endpoint");
+
   try {
     const form = await req.formData();
     const file = form.get("file") as File | null;

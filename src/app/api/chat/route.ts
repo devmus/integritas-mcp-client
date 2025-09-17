@@ -7,6 +7,7 @@ const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const RATE_LIMIT_MAX_REQUESTS = 5;
 
 export async function POST(req: Request) {
+  console.log("chat endpoint");
   const token = req.headers.get("Authorization")?.split(" ")[1];
 
   if (!token) {
