@@ -1,86 +1,39 @@
-// import { StreamingTextResponse, LangChainStream } from 'ai';
+// app/api/chat/route.ts
+import { NextRequest } from "next/server";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
-const rateLimitStore: Record<string, number[]> = {};
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 5;
+const MCP_HOST_URL = process.env.MCP_HOST_URL ?? "http://127.0.0.1:8788/chat";
 
-export async function POST(req: Request) {
-  console.log("chat endpoint");
-  const token = req.headers.get("Authorization")?.split(" ")[1];
+export async function POST(req: NextRequest) {
+  try {
+    const headers: HeadersInit = { "content-type": "application/json" };
+    const auth = req.headers.get("authorization");
+    if (auth) headers["authorization"] = auth;
+    const apiKey = req.headers.get("x-api-key");
+    if (apiKey) headers["x-api-key"] = apiKey;
 
-  if (!token) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+    const body = await req.text(); // keep raw for streaming compatibility
 
-  const now = Date.now();
-  const userRequests = rateLimitStore[token] || [];
-  const requestsInWindow = userRequests.filter(
-    (ts) => now - ts < RATE_LIMIT_WINDOW
-  );
-
-  if (requestsInWindow.length >= RATE_LIMIT_MAX_REQUESTS) {
-    return new Response("Too Many Requests", { status: 429 });
-  }
-
-  rateLimitStore[token] = [...requestsInWindow, now];
-
-  const { messages } = await req.json();
-  const userMessage = messages[messages.length - 1].content as string;
-
-  if (userMessage.toLowerCase().includes("error test")) {
-    const stream = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        const send = (text: string) => {
-          controller.enqueue(encoder.encode(text));
-        };
-
-        send(
-          '{"type": "error", "error": "Failed to stamp hash: Insufficient funds."}\n'
-        );
-        controller.close();
-      },
+    const resp = await fetch(MCP_HOST_URL, {
+      method: "POST",
+      headers,
+      body,
     });
-    return new Response(stream, {
-      headers: { "Content-Type": "text/plain" },
+
+    // Forward status and headers (normalize content-type)
+    const ct = resp.headers.get("content-type") || "text/plain";
+    const { status, statusText } = resp;
+
+    return new Response(resp.body, {
+      status,
+      statusText,
+      headers: { "content-type": ct },
     });
+  } catch (e: any) {
+    return new Response(
+      JSON.stringify({ error: "Proxy failure", detail: e?.message }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
   }
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      const send = (text: string) => {
-        controller.enqueue(encoder.encode(text));
-      };
-
-      send('{"type": "step", "step": "Stamping hash..."}\n');
-      await new Promise((res) => setTimeout(res, 1000));
-      send(
-        '{"type": "step_result", "result": "✅ Hash stamped successfully! Transaction ID: 0x123...def"}\n'
-      );
-      await new Promise((res) => setTimeout(res, 500));
-
-      send('{"type": "step", "step": "Checking stamp status..."}\n');
-      await new Promise((res) => setTimeout(res, 1500));
-      send('{"type": "step_result", "result": "✅ Status: Confirmed"}\n');
-      await new Promise((res) => setTimeout(res, 500));
-
-      send('{"type": "step", "step": "Resolving proof..."}\n');
-      await new Promise((res) => setTimeout(res, 1000));
-      send('{"type": "step_result", "result": "✅ Proof resolved."}\n');
-      await new Promise((res) => setTimeout(res, 500));
-
-      send(
-        '{"type": "final_response", "response": "Your document has been successfully stamped and verified on the blockchain.", "proof": { "timestamp": "2025-08-29T12:00:00Z", "hash": "...", "transactionId": "0x123...def" }}'
-      );
-
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    headers: { "Content-Type": "text/plain" },
-  });
 }
