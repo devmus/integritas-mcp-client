@@ -197,9 +197,10 @@ export function Chat() {
   async function uploadFileToServer(
     f: File
   ): Promise<{ url: string; filename: string }> {
+    console.log("Upload url", url);
     const fd = new FormData();
     fd.append("file", f);
-    const resp = await fetch("api/upload", { method: "POST", body: fd });
+    const resp = await fetch("/mcp/api/upload", { method: "POST", body: fd });
     if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
     const data = await resp.json();
     return { url: data.signedUrl as string, filename: data.filename as string };
