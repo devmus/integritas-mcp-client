@@ -81,3 +81,34 @@ export function useSessionToken(): string | null {
   }
   return tok;
 }
+
+export async function fetchJsonOrPrettyError(url: string, init?: RequestInit) {
+  const resp = await fetch(url, init);
+  if (resp.ok) return resp.json();
+
+  const status = resp.status;
+  let body = "";
+  try {
+    body = await resp.text();
+  } catch {}
+
+  // strip HTML + clamp
+  const short = body
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+
+  const label =
+    status === 504
+      ? "Request timed out"
+      : status === 502
+      ? "Bad gateway"
+      : status === 503
+      ? "Service unavailable"
+      : "API error";
+
+  throw new Error(
+    `${label} (HTTP ${status}).${short ? ` Details: ${short}` : ""}`
+  );
+}

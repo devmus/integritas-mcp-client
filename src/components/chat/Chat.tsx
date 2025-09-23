@@ -5,7 +5,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { UIMessage, ChatBlock } from "./types";
 import { MessageBubble } from "./MessageBubble";
-import { buildBlocksFromApiResponse, useSessionToken } from "./helpers";
+import {
+  buildBlocksFromApiResponse,
+  fetchJsonOrPrettyError,
+  useSessionToken,
+} from "./helpers";
 import { hashFileSha3_256 } from "@/lib/hashFile";
 
 export function Chat() {
@@ -67,14 +71,11 @@ export function Chat() {
     if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
     if (apiKey) headers["x-api-key"] = apiKey;
 
-    const resp = await fetch("/mcp/api/chat", {
+    const data = await fetchJsonOrPrettyError("/mcp/api/chat", {
       method: "POST",
       headers,
       body: JSON.stringify({ messages: next.slice(-10) }),
     });
-    if (!resp.ok)
-      throw new Error(`API Error: ${resp.status} - ${await resp.text()}`);
-    const data = await resp.json();
     const blocks: ChatBlock[] = buildBlocksFromApiResponse(data);
     setMessages((prev) => [...prev, { role: "assistant", blocks }]);
   }
@@ -111,17 +112,11 @@ export function Chat() {
     setInput("");
     setFile(null);
 
-    const resp = await fetch("/mcp/api/chat", {
+    const data = await fetchJsonOrPrettyError("/mcp/api/chat", {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        messages: next.slice(-10),
-        toolArgs,
-      }),
+      body: JSON.stringify({ messages: next.slice(-10), toolArgs }),
     });
-    if (!resp.ok)
-      throw new Error(`API Error: ${resp.status} - ${await resp.text()}`);
-    const data = await resp.json();
     const blocks: ChatBlock[] = buildBlocksFromApiResponse(data);
     setMessages((prev) => [...prev, { role: "assistant", blocks }]);
   }
@@ -155,18 +150,11 @@ export function Chat() {
       if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
       if (apiKey) headers["x-api-key"] = apiKey;
 
-      const resp = await fetch(apiUrl, {
+      const data = await fetchJsonOrPrettyError(apiUrl, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          messages: next.slice(-10),
-          toolArgs,
-        }),
+        body: JSON.stringify({ messages: next.slice(-10), toolArgs }),
       });
-      if (!resp.ok)
-        throw new Error(`API Error: ${resp.status} - ${await resp.text()}`);
-
-      const data = await resp.json();
       const blocks: ChatBlock[] = buildBlocksFromApiResponse(data);
       setMessages((prev) => [...prev, { role: "assistant", blocks }]);
     } catch (e: any) {
