@@ -121,8 +121,6 @@ export async function uploadToMinio({
   // Schedule file deletion after 1 hour (same as signed URL expiration)
   scheduleFileDeletion(bucket, key, 1);
 
-  console.log("signedUrl", signedUrl);
-
   return {
     key,
     signedUrl: publicFile ? publicUrl : signedUrl,
