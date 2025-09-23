@@ -495,6 +495,7 @@ export function Chat() {
   }
 
   async function sendAsk() {
+    console.log("ASKING");
     const userText = input.trim() || "What can you do?";
     const next = [...messages, { role: "user" as const, content: userText }];
     setMessages(next);
@@ -519,6 +520,8 @@ export function Chat() {
   }
 
   async function sendVerify() {
+    console.log("VERIFYING");
+
     // Verify now requires a PROOF FILE (JSON) — upload, then call tool with file_url
     if (!file) throw new Error("Select a proof file (.json) first.");
 
@@ -566,6 +569,7 @@ export function Chat() {
   ///////////////////////////////////////////////////////////////
   // OPTION A: HASH FILE HERE IN FRONTEND FOR STAMP
   const sendMessage = async () => {
+    console.log("STAMPING");
     if (!file) return;
 
     setIsSending(true);

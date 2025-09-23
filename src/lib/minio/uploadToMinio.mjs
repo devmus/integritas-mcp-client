@@ -58,7 +58,6 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import {
   MINIO_URL,
   MINIO_PUBLIC_URL,
-  NODE_ENV,
   MINIO_USER,
   MINIO_PASS,
 } from "../../config/config.mjs";
@@ -90,6 +89,7 @@ export async function uploadToMinio({
   key,
   contentType,
   bucket = "uploads",
+  publicFile = false,
 }) {
   await s3.send(
     new PutObjectCommand({
@@ -101,8 +101,9 @@ export async function uploadToMinio({
   );
 
   // Generate signed URL using the public domain client with download parameter
+  let s3signer = publicFile ? s3Public : s3;
   const signedUrl = await getSignedUrl(
-    s3Public,
+    s3signer,
     new GetObjectCommand({
       Bucket: bucket,
       Key: key,
@@ -120,9 +121,11 @@ export async function uploadToMinio({
   // Schedule file deletion after 1 hour (same as signed URL expiration)
   scheduleFileDeletion(bucket, key, 1);
 
+  console.log("signedUrl", signedUrl);
+
   return {
     key,
-    signedUrl: NODE_ENV === "production" ? publicUrl : signedUrl,
+    signedUrl: publicFile ? publicUrl : signedUrl,
   };
 }
 
