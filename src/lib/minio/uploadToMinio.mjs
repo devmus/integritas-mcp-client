@@ -1,53 +1,3 @@
-// // src\lib\minio\uploadToMinio
-// import {
-//   S3Client,
-//   PutObjectCommand,
-//   GetObjectCommand,
-// } from "@aws-sdk/client-s3";
-// import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-// import { MINIO_URL } from "../../config/config.mjs";
-
-// const s3 = new S3Client({
-//   region: "us-east-1",
-//   endpoint: MINIO_URL,
-//   forcePathStyle: true,
-//   credentials: {
-//     accessKeyId: "minioadmin",
-//     secretAccessKey: "minioadmin",
-//   },
-// });
-
-// export async function uploadToMinio({
-//   buffer,
-//   key,
-//   contentType,
-//   bucket = "uploads",
-// }) {
-//   await s3.send(
-//     new PutObjectCommand({
-//       Bucket: bucket,
-//       Key: key,
-//       Body: buffer,
-//       ContentType: contentType || "application/octet-stream",
-//     })
-//   );
-
-//   // ✅ generate signed URL valid for 1 hour
-//   const signedUrl = await getSignedUrl(
-//     s3,
-//     new GetObjectCommand({
-//       Bucket: bucket,
-//       Key: key,
-//     }),
-//     { expiresIn: 3600 }
-//   );
-
-//   return {
-//     key,
-//     signedUrl,
-//   };
-// }
-
 import {
   S3Client,
   PutObjectCommand,
@@ -58,6 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import {
   MINIO_URL,
   MINIO_PUBLIC_URL,
+  NODE_ENV,
   MINIO_USER,
   MINIO_PASS,
 } from "../../config/config.mjs";
@@ -89,7 +40,6 @@ export async function uploadToMinio({
   key,
   contentType,
   bucket = "uploads",
-  publicFile = true,
 }) {
   await s3.send(
     new PutObjectCommand({
@@ -101,9 +51,8 @@ export async function uploadToMinio({
   );
 
   // Generate signed URL using the public domain client with download parameter
-  let s3signer = publicFile ? s3Public : s3;
   const signedUrl = await getSignedUrl(
-    s3signer,
+    s3Public,
     new GetObjectCommand({
       Bucket: bucket,
       Key: key,
@@ -123,7 +72,7 @@ export async function uploadToMinio({
 
   return {
     key,
-    signedUrl: publicFile ? publicUrl : signedUrl,
+    signedUrl: NODE_ENV === "production" ? publicUrl : signedUrl,
   };
 }
 
