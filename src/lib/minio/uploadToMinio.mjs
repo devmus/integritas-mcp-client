@@ -89,7 +89,7 @@ export async function uploadToMinio({
   key,
   contentType,
   bucket = "uploads",
-  publicFile = false,
+  publicFile = true,
 }) {
   await s3.send(
     new PutObjectCommand({
