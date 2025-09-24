@@ -1,6 +1,12 @@
+// src/components/chat/Blocks.tsx
 "use client";
+
 import type { ChatBlock } from "./types";
 
+/**
+ * Renders structured UI blocks returned by the host.
+ * IMPORTANT: This component does not render `finalText` (msg.text).
+ */
 export function Blocks({ blocks }: { blocks: ChatBlock[] }) {
   return (
     <div className="w-full max-w-[780px] space-y-2">
@@ -32,12 +38,7 @@ export function Blocks({ blocks }: { blocks: ChatBlock[] }) {
             );
           case "text":
             return (
-              <div
-                key={idx}
-                className={
-                  b.fromLLM ? "text-white" : "text-gray-800 dark:text-gray-200"
-                }
-              >
+              <div key={idx} className="text-gray-800 dark:text-gray-200">
                 {b.text}
               </div>
             );

@@ -1,5 +1,4 @@
-// src\components\chat\Chat.tsx
-
+// src/components/chat/Chat.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -9,8 +8,43 @@ import {
   buildBlocksFromApiResponse,
   fetchJsonOrPrettyError,
   useSessionToken,
+  extractLinksFromHostOrSteps, // <-- add import
 } from "./helpers";
 import { hashFileSha3_256 } from "@/lib/hashFile";
+
+type LLMProvider = "anthropic" | "openai" | "openrouter" | "mock";
+type LLMChoice = { provider: LLMProvider; model?: string };
+
+const PROVIDERS: { label: string; value: LLMProvider }[] = [
+  { label: "OpenAI", value: "openai" },
+  { label: "Anthropic", value: "anthropic" },
+  { label: "OpenRouter", value: "openrouter" },
+  { label: "Mock", value: "mock" },
+];
+
+// Mirror server allowlist
+const MODELS: Record<LLMProvider, { label: string; value: string }[]> = {
+  openai: [
+    { label: "gpt-4o-mini", value: "gpt-4o-mini" },
+    { label: "gpt-4.1-mini", value: "gpt-4.1-mini" },
+  ],
+  anthropic: [
+    {
+      label: "claude-3-5-sonnet-20240620",
+      value: "claude-3-5-sonnet-20240620",
+    },
+    { label: "claude-3-5-haiku-20241022", value: "claude-3-5-haiku-20241022" },
+  ],
+  openrouter: [
+    {
+      label: "deepseek/deepseek-chat-v3.1 (free)",
+      value: "deepseek/deepseek-chat-v3.1:free",
+    },
+    { label: "gemma-2-9b-it (free)", value: "google/gemma-2-9b-it:free" },
+    { label: "gpt-4o-mini (OR)", value: "openai/gpt-4o-mini" },
+  ],
+  mock: [{ label: "mock", value: "mock" }],
+};
 
 export function Chat() {
   const [messages, setMessages] = useState<UIMessage[]>([]);
@@ -19,8 +53,10 @@ export function Chat() {
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [isSending, setIsSending] = useState(false);
-
-  // Modes: ask, stamp, verify (verify is proof-file only)
+  const [llm, setLlm] = useState<LLMChoice>({
+    provider: "openrouter",
+    model: MODELS.openrouter[0].value,
+  });
   const [mode, setMode] = useState<"ask" | "stamp" | "verify">("stamp");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -30,19 +66,59 @@ export function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleDownloadProof = (proof: object) => {
-    const blob = new Blob([JSON.stringify(proof, null, 2)], {
-      type: "application/json",
+  // ---------- helpers ----------
+
+  function toHostMessages(ui: UIMessage[], lastUserText?: string) {
+    const hostMsgs = ui.map((m) => ({
+      role: m.role,
+      content: typeof m.text === "string" ? m.text : "", // host expects `content`
+    }));
+    if (lastUserText) hostMsgs.push({ role: "user", content: lastUserText });
+    return hostMsgs.slice(-10);
+  }
+
+  function makeHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
+    if (apiKey) headers["x-api-key"] = apiKey;
+    return headers;
+  }
+
+  async function callHostChat(body: unknown) {
+    return fetchJsonOrPrettyError("/mcp/api/chat", {
+      method: "POST",
+      headers: makeHeaders(),
+      body: JSON.stringify(body),
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "proof.json";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
+  }
+
+  function pushUser(text: string) {
+    setMessages((prev) => [...prev, { role: "user", text }]);
+  }
+
+  function pushAssistantFromHost(data: any) {
+    const blocks: ChatBlock[] = buildBlocksFromApiResponse(data);
+    const links = extractLinksFromHostOrSteps(data); // <-- NEW
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        text: typeof data.finalText === "string" ? data.finalText : "",
+        links, // <-- clickable buttons under the bubble
+        // blocks,
+      },
+    ]);
+  }
+
+  function pushAssistantError(message: string) {
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", text: `⚠️ ${message}` },
+    ]);
+  }
 
   async function uploadFileToServer(
     f: File
@@ -52,157 +128,132 @@ export function Chat() {
     const resp = await fetch("/mcp/api/upload", { method: "POST", body: fd });
     if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
     const data = await resp.json();
-    return {
-      url: data.signedUrl as string, // server must return a fetchable URL for the MCP server
-      filename: data.filename as string,
-    };
+    return { url: data.signedUrl as string, filename: data.filename as string };
   }
 
+  // ---------- flows ----------
+
   async function sendAsk() {
-    console.log("ASKING");
     const userText = input.trim() || "What can you do?";
-    const next = [...messages, { role: "user" as const, content: userText }];
-    setMessages(next);
+    pushUser(userText);
     setInput("");
 
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
-    if (apiKey) headers["x-api-key"] = apiKey;
-
-    const data = await fetchJsonOrPrettyError("/mcp/api/chat", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ messages: next.slice(-10) }),
-    });
-    const blocks: ChatBlock[] = buildBlocksFromApiResponse(data);
-    setMessages((prev) => [...prev, { role: "assistant", blocks }]);
+    const body = { messages: toHostMessages(messages, userText), llm };
+    const data = await callHostChat(body);
+    pushAssistantFromHost(data);
   }
 
   async function sendVerify() {
-    console.log("VERIFYING");
-
-    // Verify now requires a PROOF FILE (JSON) — upload, then call tool with file_url
     if (!file) throw new Error("Select a proof file (.json) first.");
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
-    if (apiKey) headers["x-api-key"] = apiKey;
-
-    // 1) Upload proof to your backend to get a fetchable URL
     const { url, filename } = await uploadFileToServer(file);
 
-    // 2) Visible user text
-    const shownText = `${
+    const userText = `${
       input ? input + " — " : ""
     }Verify this proof file: ${filename}`;
-
-    // 3) Correct tool + arg shape expected by host/server
-    const toolArgs = {
-      verify_data: {
-        req: { file_url: url, api_key: apiKey },
-      },
-    };
-
-    const next = [...messages, { role: "user" as const, content: shownText }];
-    setMessages(next);
+    pushUser(userText);
     setInput("");
     setFile(null);
 
-    const data = await fetchJsonOrPrettyError("/mcp/api/chat", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ messages: next.slice(-10), toolArgs }),
-    });
-    const blocks: ChatBlock[] = buildBlocksFromApiResponse(data);
-    setMessages((prev) => [...prev, { role: "assistant", blocks }]);
+    const toolArgs = {
+      verify_data: { req: { file_url: url, api_key: apiKey } },
+    };
+    const body = {
+      messages: toHostMessages(messages, userText),
+      toolArgs,
+      llm,
+    };
+
+    const data = await callHostChat(body);
+    pushAssistantFromHost(data);
   }
 
-  ///////////////////////////////////////////////////////////////
-  // OPTION A: HASH FILE HERE IN FRONTEND FOR STAMP
-  const sendMessage = async () => {
-    console.log("STAMPING");
-    if (!file) return;
+  async function sendStamp() {
+    if (!file) throw new Error("Choose a file to stamp first.");
+    const hash = await hashFileSha3_256(file);
 
-    setIsSending(true);
-    try {
-      const hash = await hashFileSha3_256(file);
+    const userText = `${input ? input + " — " : ""}Stamp this hash: ${hash}`;
+    pushUser(userText);
+    setInput("");
+    setFile(null);
 
-      const toolArgs = {
-        stamp_data: {
-          req: { file_hash: hash, api_key: apiKey },
-        },
-      } as const;
+    const toolArgs = {
+      stamp_data: { req: { file_hash: hash, api_key: apiKey } },
+    } as const;
+    const body = {
+      messages: toHostMessages(messages, userText),
+      toolArgs,
+      llm,
+    };
 
-      const shownText = `${input ? input + " — " : ""}Stamp this hash: ${hash}`;
-      const next = [...messages, { role: "user" as const, content: shownText }];
-      setMessages(next);
-      setInput("");
-      setFile(null);
+    const data = await callHostChat(body);
+    pushAssistantFromHost(data);
+  }
 
-      const apiUrl = "/mcp/api/chat";
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
-      if (apiKey) headers["x-api-key"] = apiKey;
-
-      const data = await fetchJsonOrPrettyError(apiUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ messages: next.slice(-10), toolArgs }),
-      });
-      const blocks: ChatBlock[] = buildBlocksFromApiResponse(data);
-      setMessages((prev) => [...prev, { role: "assistant", blocks }]);
-    } catch (e: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: e?.message || "Unexpected error.",
-          isError: true,
-        },
-      ]);
-    } finally {
-      setIsSending(false);
-    }
-  };
-  // OPTION A END
-  ////////////////////////////////////////////////////////////////
-
-  const handleSend = async () => {
+  async function handleSend() {
     setIsSending(true);
     try {
       if (mode === "ask") await sendAsk();
       else if (mode === "verify") await sendVerify();
-      else await sendMessage();
+      else await sendStamp();
     } catch (e: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: e?.message || "Unexpected error.",
-          isError: true,
-        },
-      ]);
+      pushAssistantError(e?.message || "Unexpected error.");
     } finally {
       setIsSending(false);
     }
-  };
+  }
+
+  // ---------- UI ----------
 
   return (
     <div className="flex flex-col h-[80vh] bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+      {/* LLM selector */}
+      <div className="flex items-center gap-2 p-4">
+        <select
+          value={llm.provider}
+          onChange={(e) => {
+            const provider = e.target.value as LLMProvider;
+            const firstModel = MODELS[provider][0]?.value;
+            setLlm({ provider, model: firstModel });
+          }}
+          className="px-3 py-2 border rounded-lg bg-gray-50 dark:bg-gray-700 dark:text-white"
+          title="Choose LLM provider"
+        >
+          {PROVIDERS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={llm.model}
+          onChange={(e) =>
+            setLlm((prev) => ({ ...prev, model: e.target.value }))
+          }
+          className="px-3 py-2 border rounded-lg bg-gray-50 dark:bg-gray-700 dark:text-white"
+          title="Choose model"
+          disabled={!llm.provider}
+        >
+          {(MODELS[llm.provider] ?? []).map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+
+        <button
+          onClick={() => setShowApiKeyInput((v) => !v)}
+          className="ml-auto p-2 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500"
+          title="Toggle API Key Input"
+        >
+          API Key
+        </button>
+      </div>
+
       <div className="flex-1 overflow-y-auto p-6">
         <div className="space-y-4">
           {messages.map((m, i) => (
-            <MessageBubble
-              key={i}
-              msg={m}
-              onDownloadProof={handleDownloadProof}
-            />
+            <MessageBubble key={i} msg={m} />
           ))}
           <div ref={messagesEndRef} />
         </div>
@@ -215,7 +266,7 @@ export function Chat() {
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your API Key..."
+              placeholder="Enter your API Key…"
               className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
             />
           </div>
@@ -242,47 +293,37 @@ export function Chat() {
         </div>
 
         <div className="flex items-center space-x-2">
-          <button
-            onClick={() => setShowApiKeyInput((v) => !v)}
-            className="p-2 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 focus:outline-none"
-            title="Toggle API Key Input"
-          >
-            API Key
-          </button>
-
-          <div className="flex items-center gap-2 mb-2">
-            <div className="inline-flex rounded-lg overflow-hidden border">
-              <button
-                className={`px-3 py-2 ${
-                  mode === "ask"
-                    ? "bg-blue-500 text-white"
-                    : "bg-gray-100 dark:bg-gray-700"
-                }`}
-                onClick={() => setMode("ask")}
-              >
-                Ask
-              </button>
-              <button
-                className={`px-3 py-2 ${
-                  mode === "stamp"
-                    ? "bg-blue-500 text-white"
-                    : "bg-gray-100 dark:bg-gray-700"
-                }`}
-                onClick={() => setMode("stamp")}
-              >
-                Stamp
-              </button>
-              <button
-                className={`px-3 py-2 ${
-                  mode === "verify"
-                    ? "bg-blue-500 text-white"
-                    : "bg-gray-100 dark:bg-gray-700"
-                }`}
-                onClick={() => setMode("verify")}
-              >
-                Verify
-              </button>
-            </div>
+          <div className="inline-flex rounded-lg overflow-hidden border">
+            <button
+              className={`px-3 py-2 ${
+                mode === "ask"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-100 dark:bg-gray-700"
+              }`}
+              onClick={() => setMode("ask")}
+            >
+              Ask
+            </button>
+            <button
+              className={`px-3 py-2 ${
+                mode === "stamp"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-100 dark:bg-gray-700"
+              }`}
+              onClick={() => setMode("stamp")}
+            >
+              Stamp
+            </button>
+            <button
+              className={`px-3 py-2 ${
+                mode === "verify"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-100 dark:bg-gray-700"
+              }`}
+              onClick={() => setMode("verify")}
+            >
+              Verify
+            </button>
           </div>
 
           <input
@@ -293,8 +334,6 @@ export function Chat() {
             placeholder={
               mode === "ask"
                 ? "Ask about Integritas or the server…"
-                : mode === "verify"
-                ? "Optionally add a note…"
                 : "Optionally add a note…"
             }
             className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"

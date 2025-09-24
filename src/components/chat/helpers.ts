@@ -1,4 +1,7 @@
+// src/components/chat/helpers.ts
 import type { ToolStep, ChatBlock } from "./types";
+
+export type ChatLink = { rel?: string; href: string; label?: string };
 
 export function tryParseJSON<T = any>(s?: string): T | undefined {
   if (!s) return;
@@ -10,10 +13,8 @@ export function tryParseJSON<T = any>(s?: string): T | undefined {
 }
 
 const TOOL_LABELS: Record<string, string> = {
-  stamp_hash: "Stamp Hash",
-  validate_hash: "Validate Hash",
-  get_stamp_status: "Check Stamp Status",
-  resolve_proof: "Resolve Proof",
+  stamp_data: "Stamp Data",
+  verify_data: "Verify Data",
   health: "Health Check",
   ready: "Readiness Check",
 };
@@ -26,24 +27,123 @@ export function humanizeToolName(name?: string) {
   );
 }
 
-/** Extract pretty JSON from an MCP tool step result */
+// envelope-first: prefer result.structuredContent, fall back to result
 export function extractToolJson(step: ToolStep): string {
-  const text = step?.result?.content?.[0]?.text;
-  if (typeof text === "string" && text.trim().startsWith("{")) {
+  const r: any = step?.result ?? {};
+  const env = r?.structuredContent ?? r;
+
+  try {
+    return JSON.stringify(env, null, 2);
+  } catch {
     try {
-      return JSON.stringify(JSON.parse(text), null, 2);
+      return JSON.stringify(r, null, 2);
     } catch {
-      // fall through
+      return String(r ?? "");
     }
   }
-  try {
-    return JSON.stringify(step.result ?? {}, null, 2);
-  } catch {
-    return String(step.result ?? "");
+}
+/**
+ * Extract clickable links from the host response.
+ * Priority:
+ *   1) step.result.structuredContent.links[]
+ *   2) stamp:  structuredContent.data.proof_url
+ *      verify: structuredContent.data.verification_url
+ *   3) nested raw payloads:
+ *        - stamp:  data.raw.data.proofFile.download_url
+ *        - verify: data.raw.data.file.download_url
+ *   4) JSON-encoded envelope inside result.content[0].text (fallback)
+ */
+export function extractLinksFromHostOrSteps(data: any): ChatLink[] {
+  const out: ChatLink[] = [];
+
+  // helper: add if href is a string
+  const push = (href?: any, label?: string, rel?: string) => {
+    if (typeof href === "string" && href) {
+      out.push({ href, label, rel });
+    }
+  };
+
+  const steps: ToolStep[] = Array.isArray(data?.tool_steps)
+    ? data.tool_steps
+    : [];
+
+  for (const step of steps) {
+    const name = (step as any)?.name as string | undefined;
+    const r: any = step?.result ?? {};
+    const sc: any = r?.structuredContent;
+
+    // (1) envelope links first
+    const links = sc?.links;
+    if (Array.isArray(links)) {
+      for (const l of links) {
+        push(l?.href, l?.label, l?.rel);
+      }
+    }
+
+    // (2) direct data URLs inside the envelope
+    const d = sc?.data || {};
+    if (name === "stamp_data") {
+      push(d?.proof_url, "Download proof", "proof");
+    } else if (name === "verify_data") {
+      push(d?.verification_url, "View verification", "verification");
+    }
+
+    // (3) nested raw payloads
+    const raw = d?.raw?.data || {};
+    if (name === "stamp_data") {
+      push(raw?.proofFile?.download_url, "Download proof", "proof");
+    } else if (name === "verify_data") {
+      push(raw?.file?.download_url, "View verification", "verification");
+    }
+
+    // (4) fallback: JSON string in content[0].text
+    const text = r?.content?.[0]?.text;
+    if (typeof text === "string" && text.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(text);
+        const psc = parsed?.structuredContent;
+        const pData = psc?.data || {};
+        const pLinks = psc?.links;
+
+        if (Array.isArray(pLinks)) {
+          for (const l of pLinks) push(l?.href, l?.label, l?.rel);
+        }
+        if (name === "stamp_data") {
+          push(pData?.proof_url, "Download proof", "proof");
+          push(
+            pData?.raw?.data?.proofFile?.download_url,
+            "Download proof",
+            "proof"
+          );
+        } else if (name === "verify_data") {
+          push(pData?.verification_url, "View verification", "verification");
+          push(
+            pData?.raw?.data?.file?.download_url,
+            "View verification",
+            "verification"
+          );
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
   }
+
+  // also include top-level links if host provided them
+  const top = Array.isArray(data?.links) ? data.links : [];
+  for (const l of top) push(l?.href, l?.label, l?.rel);
+
+  // de-dupe by href (keep first label)
+  const uniq = new Map<string, ChatLink>();
+  for (const l of out) {
+    if (!uniq.has(l.href)) uniq.set(l.href, l);
+  }
+  return Array.from(uniq.values());
 }
 
-/** Build UI blocks from the server response */
+/**
+ * Build UI blocks (tool info + JSON). Do NOT add a final text block here.
+ */
 export function buildBlocksFromApiResponse(data: any): ChatBlock[] {
   const blocks: ChatBlock[] = [];
 
@@ -60,13 +160,6 @@ export function buildBlocksFromApiResponse(data: any): ChatBlock[] {
       blocks.push({ kind: "toolJson", jsonText });
     }
   }
-
-  blocks.push({ kind: "heading", text: "Final response" });
-  blocks.push({
-    kind: "text",
-    text: String(data.finalText ?? ""),
-    fromLLM: true,
-  });
 
   return blocks;
 }

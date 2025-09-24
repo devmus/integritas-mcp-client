@@ -12,10 +12,11 @@ export interface ToolStep {
   tx_id?: string;
 }
 
+export type ChatLink = { rel?: string; href: string; label?: string };
+
 export type UIMessage = {
-  role: "user" | "assistant";
-  content?: string; // user messages
-  blocks?: ChatBlock[]; // assistant structured content
-  proof?: object;
-  isError?: boolean;
+  role: "user" | "assistant" | "system" | "tool";
+  text?: string;
+  links?: ChatLink[];
+  blocks?: ChatBlock[];
 };
