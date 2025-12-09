@@ -1,6 +1,6 @@
 // hashFileSha3.ts
-import { sha3_256 } from "@noble/hashes/sha3";
-import { bytesToHex } from "@noble/hashes/utils";
+import { sha3_256 } from "@noble/hashes/sha3.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 
 export async function hashFileSha3_256(file: File): Promise<string> {
   // Try streaming first (best for large files)
